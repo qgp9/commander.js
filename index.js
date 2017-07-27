@@ -162,7 +162,7 @@ Command.prototype.command = function(name, desc, opts) {
   if (desc) {
     cmd.description(desc);
     this.executables = true;
-    this._execs[cmd._name] = true;
+    this._execs[cmd._name] = opts.path || true;
     if (opts.isDefault) this.defaultExecutable = cmd._name;
   }
 
@@ -467,8 +467,10 @@ Command.prototype.parse = function(argv) {
     })[0];
   }
 
+  var opts = {}
   if (this._execs[name] && typeof this._execs[name] != "function") {
-    return this.executeSubCommand(argv, args, parsed.unknown);
+    if (typeof this._execs[name] === 'string') opts.path = this._execs[name]
+    return this.executeSubCommand(argv, args, parsed.unknown, opts);
   } else if (aliasCommand) {
     // is alias of a subCommand
     args[0] = aliasCommand._name;
@@ -488,10 +490,11 @@ Command.prototype.parse = function(argv) {
  * @param {Array} argv
  * @param {Array} args
  * @param {Array} unknown
+ * @param {Object} opts
  * @api private
  */
 
-Command.prototype.executeSubCommand = function(argv, args, unknown) {
+Command.prototype.executeSubCommand = function(argv, args, unknown, opts = {}) {
   args = args.concat(unknown);
 
   if (!args.length) this.help();
@@ -503,29 +506,38 @@ Command.prototype.executeSubCommand = function(argv, args, unknown) {
     args[1] = '--help';
   }
 
-  // executable
-  var f = argv[1];
-  // name of the subcommand, link `pm-install`
-  var bin = basename(f, '.js') + '-' + args[0];
+  var localBin, bin
+
+  if (opts.path) {
+    localBin = opts.path
+  } else {
+    // executable
+    var f = argv[1];
+    // name of the subcommand, link `pm-install`
+    bin = basename(f, '.js') + '-' + args[0];
 
 
-  // In case of globally installed, get the base dir where executable
-  //  subcommand file should be located at
-  var baseDir
-    , link = fs.lstatSync(f).isSymbolicLink() ? fs.readlinkSync(f) : f;
+    // In case of globally installed, get the base dir where executable
+    //  subcommand file should be located at
+    var baseDir
+      , link = fs.lstatSync(f).isSymbolicLink() ? fs.readlinkSync(f) : f;
 
-  // when symbolink is relative path
-  if (link !== f && link.charAt(0) !== '/') {
-    link = path.join(dirname(f), link)
+    // when symbolink is relative path
+    if (link !== f && link.charAt(0) !== '/') {
+      link = path.join(dirname(f), link)
+    }
+    baseDir = dirname(link);
+
+    // prefer local `./<bin>` to bin in the $PATH
+    localBin = path.join(baseDir, bin);
   }
-  baseDir = dirname(link);
-
-  // prefer local `./<bin>` to bin in the $PATH
-  var localBin = path.join(baseDir, bin);
 
   // whether bin file is a js script with explicit `.js` extension
   var isExplicitJS = false;
-  if (exists(localBin + '.js')) {
+  if (opts.path && localBin.endsWith('.js') && exists(localBin)) {
+    bin = localBin
+    isExplicitJS = true
+  } else if (exists(localBin + '.js')) {
     bin = localBin + '.js';
     isExplicitJS = true;
   } else if (exists(localBin)) {
@@ -708,7 +720,7 @@ Command.prototype.parseOptions = function(argv) {
         arg = argv[++i];
         if (null == arg) return this.optionMissingArgument(option);
         this.emit('option:' + option.name(), arg);
-      // optional arg
+        // optional arg
       } else if (option.optional) {
         arg = argv[i+1];
         if (null == arg || ('-' == arg[0] && '-' != arg)) {
@@ -717,7 +729,7 @@ Command.prototype.parseOptions = function(argv) {
           ++i;
         }
         this.emit('option:' + option.name(), arg);
-      // bool
+        // bool
       } else {
         this.emit('option:' + option.name());
       }
@@ -943,8 +955,8 @@ Command.prototype.optionHelp = function() {
 
   // Append the help information
   return this.options.map(function(option) {
-      return pad(option.flags, width) + '  ' + option.description;
-    }).concat([pad('-h, --help', width) + '  ' + 'output usage information'])
+    return pad(option.flags, width) + '  ' + option.description;
+  }).concat([pad('-h, --help', width) + '  ' + 'output usage information'])
     .join('\n');
 };
 
@@ -967,9 +979,9 @@ Command.prototype.commandHelp = function() {
 
     return [
       cmd._name
-        + (cmd._alias ? '|' + cmd._alias : '')
-        + (cmd.options.length ? ' [options]' : '')
-        + ' ' + args
+      + (cmd._alias ? '|' + cmd._alias : '')
+      + (cmd.options.length ? ' [options]' : '')
+      + ' ' + args
       , cmd._description
     ];
   });
